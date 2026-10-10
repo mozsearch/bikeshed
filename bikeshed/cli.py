@@ -449,6 +449,20 @@ def main() -> None:
         help="Outputs a skeleton WPT file for you to start with.",
     )
 
+    indexParser = subparsers.add_parser("index", help="Emit cross-referencing information for tools like mozsearch.")
+    indexParser.add_argument(
+        "infile",
+        nargs="?",
+        default=None,
+        help='Path to the source file: stdin ("-"), an https URL, a .bs or.src.html file, or a tar archive containing an index.bs file.',
+    )
+    indexParser.add_argument(
+        "--mozsearch",
+        dest="mozsearchOutputDir",
+        required=False,
+        help="Enable mozsearch analysis file output into the given directory."
+    )
+
     options, extras = argparser.parse_known_args()
 
     if options.silent:
@@ -502,6 +516,8 @@ def main() -> None:
         handleTemplate(options)
     elif options.subparserName == "wpt":
         handleWpt(options)
+    elif options.subparserName == "index":
+        handleIndex(options, extras)
 
 
 def handleUpdate(options: argparse.Namespace) -> None:
@@ -833,3 +849,26 @@ assert_equals(ACTUAL VALUE HERE, EXPECTED VALUE HERE, "TEST DESCRIPTION");
 </script>
 """,
         )
+
+def handleIndex(options: argparse.Namespace, extras: list[str]) -> None:
+    from . import metadata
+    from .Spec import Spec
+
+    from .index import mozsearch
+
+    doc = Spec(
+        inputFilename=options.infile,
+        # not sure we need this
+        lineNumbers=True,
+    )
+    if not doc.valid:
+        return
+
+    doc.mdCommandLine = metadata.fromCommandLine(extras)
+    # Act like "force" was specified
+    doc.mdCommandLine.addData("Die On", "nothing")
+
+    with m.messagesSilent() as _:
+        doc.preprocess()
+    analysis = mozsearch.generateMozsearchRecords(doc)
+

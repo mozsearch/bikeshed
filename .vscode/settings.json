@@ -4,5 +4,6 @@
         "stylesheet.include": "css",
         "defaults*.include": "json",
         "bs-extensions.include": "bikeshed"
-    }
+    },
+    "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${profileName}${separator}${appName} PID=3795203"
 }

@@ -1,0 +1,1 @@
+from .mozsearch import (generateMozsearchRecords)
