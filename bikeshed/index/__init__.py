@@ -7,8 +7,10 @@ just before its final cleanup (which removes, ex: `bs-autolink-syntax`), so
 that links have their resolved `href`s and the syntax they were written with.
 Elements without a source position (`bs-line-number`) are generated (ex: the
 index and table of contents sections, dfn panels), and left out, but for those
-in IDL blocks, whose positions are recovered from the block's source text,
-which they are verbatim substrings of.
+in data blocks (the `<pre>`s Bikeshed transforms, ex: IDL blocks, and
+property and descriptor definitions' tables), whose positions are recovered
+from the block's source text, which they are verbatim substrings of (and
+whose `idl` is true).
 
 Positions are 1-based lines and 1-based columns in characters, as
 `bs-line-number`'s, in the spec's source, or, with a "file", in the file it
@@ -183,21 +185,29 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
 
     parents = {child: parent for parent in doc.document.iter() for child in parent}
 
-    def idlBlock(el: t.ElementT) -> t.ElementT | None:
+    def dataBlock(el: t.ElementT) -> t.ElementT | None:
+        """The block `el` is in, if its nearest ancestor with a position is a
+        data block (whose source starts with `<pre`, ex: an IDL block, or the
+        table Bikeshed made of a `<pre class=propdef>`, with its attributes)."""
         e = parents.get(el)
         while e is not None:
-            if isinstance(e.tag, str) and e.tag == "pre" and "idl" in (e.get("class") or "").split():
-                return e
+            pos = position(e) if isinstance(e.tag, str) else None
+            if pos is not None:
+                positions = idlPositions(pos.file)
+                at = positions.offset(pos.line, pos.col)
+                if at is not None and positions.source[at : at + 4].lower() == "<pre":
+                    return e
+                return None
             e = parents.get(e)
         return None
 
     def located(el: t.ElementT) -> tuple[Position, bool] | None:
-        """The element's position, and whether it was recovered from an IDL
+        """The element's position, and whether it was recovered from a data
         block."""
         pos = position(el)
         if pos:
             return pos, False
-        block = idlBlock(el)
+        block = dataBlock(el)
         blockPos = position(block) if block is not None else None
         if block is not None and blockPos is not None:
             pos = idlPositions(blockPos.file).find(block, el)
