@@ -4,7 +4,7 @@ import hashlib
 import itertools
 import re
 
-from . import datablocks, h, markdown, t
+from . import InputSource, datablocks, h, markdown, t
 from . import messages as m
 
 
@@ -80,10 +80,18 @@ def handleBikeshedInclude(el: t.ElementT, doc: t.SpecT) -> None:
             context=f"file '{path}' (included by a block on {h.approximateLineNumber(el)})",
         )
         parseConfig.macros = {**parseConfig.macros, **macros}
-        lines = h.parseLines(lines, parseConfig, context=el)
-        lines = markdown.parse(t.cast("list[str]", lines), markdown.MarkdownConfig.fromSpec(doc))
-        text = t.EarlyParsedHtmlStr("".join(lines))
+        # Parsed as the document itself is (see `Spec.earlyParse`), so that the
+        # Markdown's elements have the included file's line numbers.
+        nodes = h.nodesFromHtml("".join(lines), parseConfig, context=el)
+        text = h.strFromNodes(nodes, withIlcc=True)
+        numberedLines = InputSource.InputContent([x + "\n" for x in text.split("\n")], None).lines
+        numberedLines = markdown.parse(numberedLines, markdown.MarkdownConfig.fromSpec(doc))
+        text = t.EarlyParsedHtmlStr("".join(x.text for x in numberedLines))
         subtree = h.parseInto(h.E.div(), text)
+        # (The elements the Markdown made have lines, but not the file.)
+        for child in subtree.iter():
+            if isinstance(child.tag, str) and child.get("bs-line-number") and not child.get("bs-parse-context"):
+                child.set("bs-parse-context", parseConfig.context or "")
         datablocks.transformDataBlocks(doc, subtree)
         for childInclude in h.findAll("pre.include", subtree):
             childInclude.set("hash", hash)
