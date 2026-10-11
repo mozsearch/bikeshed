@@ -464,6 +464,30 @@ def main() -> None:
     )
     wptParser.add_argument("outfile", nargs="?", default=None, help="Path to the output file.")
 
+    indexParser = subparsers.add_parser(
+        "index",
+        help="Outputs the spec's definitions, references, headings, and algorithms, with their positions in its source, for tools that cross-reference specs.",
+    )
+    indexParser.add_argument(
+        "infile",
+        nargs="?",
+        default=None,
+        help="Path to the source file.",
+    )
+    indexParser.add_argument(
+        "outfile",
+        nargs="?",
+        default=None,
+        help="Path to the output file (default: stdout).",
+    )
+    indexParser.add_argument(
+        "--json",
+        dest="json",
+        action="store_true",
+        default=True,
+        help="Output JSON (the only format, for now; see bikeshed/index).",
+    )
+
     options, extras = argparser.parse_known_args()
 
     if options.silent:
@@ -517,6 +541,8 @@ def main() -> None:
         handleProfile(options)
     elif options.subparserName == "template":
         handleTemplate(options)
+    elif options.subparserName == "index":
+        handleIndex(options, extras)
     elif options.subparserName == "wpt":
         handleWpt(options)
 
@@ -767,6 +793,33 @@ def handleTemplate(options: argparse.Namespace) -> None:
     else:
         with open(options.outfile, "w", encoding="utf-8") as fh:
             fh.write(template.getTemplate(options.variant) or "")
+
+
+def handleIndex(options: argparse.Namespace, extras: list[str]) -> None:
+    from . import index, metadata, retrieve
+    from .Spec import Spec
+
+    # Offline and deterministic: only the data files in Bikeshed itself.
+    doc = Spec(
+        inputFilename=options.infile,
+        fileRequester=retrieve.DataFileRequester(fileType="readonly"),
+    )
+    if not doc.valid:
+        m.die("Spec is in an invalid state; exitting.")
+        return
+    doc.mdCommandLine = metadata.fromCommandLine(extras)
+    # Index whatever the spec has, whatever its errors.  (And never run the
+    # spec's own code, which "Prepare For TR" does through its extensions.)
+    doc.mdCommandLine.addData("Die On", "nothing")
+    doc.mdCommandLine.addData("Prepare For TR", "no")
+    with m.messagesSilent():
+        result = index.indexSpec(doc)
+    text = json.dumps(result, indent=1, ensure_ascii=False)
+    if options.outfile in (None, "-"):
+        sys.stdout.write(text + "\n")
+    else:
+        with open(options.outfile, "w", encoding="utf-8") as f:
+            f.write(text + "\n")
 
 
 def handleWpt(options: argparse.Namespace) -> None:
