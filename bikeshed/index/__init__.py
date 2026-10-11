@@ -11,18 +11,20 @@ in IDL blocks, whose positions are recovered from the block's source text,
 which they are verbatim substrings of.
 
 Positions are 1-based lines and 1-based columns in characters, as
-`bs-line-number`'s.  The JSON (see `INDEX_VERSION`):
+`bs-line-number`'s, in the spec's source, or, with a "file", in the file it
+includes (`<pre class=include>`) by that path (which is relative to the
+spec's source, as Bikeshed resolves it).  The JSON (see `INDEX_VERSION`):
 
     {
-      "bikeshed-index": 1,
+      "bikeshed-index": 2,
       "spec": {"shortname", "level", "title", "url"},
-      "dfns": [{"line", "col", "id", "type", "for": [...], "lt": [...],
-                "export", "noexport", "text", "idl"}],
-      "links": [{"line", "col", "href", "type", "for": [...], "lt", "spec",
-                 "syntax", "text", "idl"}],
-      "headings": [{"line", "col", "id", "level", "text"}],
-      "algorithms": [{"line", "col", "name", "for"}],
-      "steps": [{"line", "col", "path"}]
+      "dfns": [{"line", "col", "file"?, "id", "type", "for": [...],
+                "lt": [...], "export", "noexport", "text", "idl"}],
+      "links": [{"line", "col", "file"?, "href", "type", "for": [...], "lt",
+                 "spec", "syntax", "text", "idl"}],
+      "headings": [{"line", "col", "file"?, "id", "level", "text"}],
+      "algorithms": [{"line", "col", "file"?, "name", "for"}],
+      "steps": [{"line", "col", "file"?, "path"}]
     }
 
 where a link's `syntax` is the autolink syntax it was written with (ex:
@@ -35,14 +37,19 @@ from the outermost (ex: "2.3").
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from .. import config, h, unsortedJunk
 
 if TYPE_CHECKING:
     from .. import t
 
-INDEX_VERSION = 1
+# (2: positions in included files have their "file".)
+INDEX_VERSION = 2
+
+# An included file's elements' `bs-parse-context` (see `includes`), whose path
+# is relative to the spec's source.
+INCLUDED_CONTEXT = re.compile(r"^file '([^']*)'")
 
 
 def indexSpec(doc: t.SpecT) -> dict[str, Any]:
@@ -63,15 +70,32 @@ def indexSpec(doc: t.SpecT) -> dict[str, Any]:
     return captured["index"]
 
 
-def position(el: t.ElementT) -> tuple[int, int] | None:
+class Position(NamedTuple):
+    file: str | None
+    line: int
+    col: int
+
+    def fields(self) -> dict[str, Any]:
+        """The position's JSON fields."""
+        fields: dict[str, Any] = {"line": self.line, "col": self.col}
+        if self.file is not None:
+            fields["file"] = self.file
+        return fields
+
+
+def position(el: t.ElementT) -> Position | None:
+    """The element's position in the source, or in the file it's included
+    from (ex: "27:22 of file 'intro.md' (included by a block on 117:1)"), but
+    not in boilerplate (ex: "1:1 of header.include")."""
     value = el.get("bs-line-number")
-    if not value:
+    match = re.match(r"(\d+)(?::(\d+))?", value or "")
+    if not match:
         return None
-    line, _, col = value.partition(":")
-    try:
-        return int(line), int(col or 1)
-    except ValueError:
+    context = el.get("bs-parse-context")
+    included = INCLUDED_CONTEXT.match(context or "")
+    if context and not included:
         return None
+    return Position(included[1] if included else None, int(match[1]), int(match[2] or 1))
 
 
 def words(text: str) -> str:
@@ -94,11 +118,13 @@ def headingText(el: t.ElementT) -> str:
 
 class IdlPositions:
     """The positions of the names in IDL blocks, which widlparser's markup
-    doesn't have, from the blocks' source text, in which each name is found
-    after the previous one."""
+    doesn't have, from the blocks' source text (of a file: the spec's source,
+    or a file it includes), in which each name is found after the previous
+    one."""
 
-    def __init__(self, source: str) -> None:
+    def __init__(self, source: str, file: str | None = None) -> None:
         self.source = source
+        self.file = file
         self.lineStarts = [0] + [m.end() for m in re.finditer("\n", source)]
         self.blocks: dict[t.ElementT, list[int]] = {}
 
@@ -107,7 +133,7 @@ class IdlPositions:
             return None
         return self.lineStarts[line - 1] + col - 1
 
-    def toPosition(self, offset: int) -> tuple[int, int]:
+    def toPosition(self, offset: int) -> Position:
         lo, hi = 0, len(self.lineStarts)
         while lo + 1 < hi:
             mid = (lo + hi) // 2
@@ -115,13 +141,13 @@ class IdlPositions:
                 lo = mid
             else:
                 hi = mid
-        return lo + 1, offset - self.lineStarts[lo] + 1
+        return Position(self.file, lo + 1, offset - self.lineStarts[lo] + 1)
 
-    def find(self, block: t.ElementT, el: t.ElementT) -> tuple[int, int] | None:
+    def find(self, block: t.ElementT, el: t.ElementT) -> Position | None:
         """The position of `el`'s text in the IDL `block`."""
         if block not in self.blocks:
             start = position(block)
-            at = self.offset(*start) if start else None
+            at = self.offset(start.line, start.col) if start else None
             if at is None:
                 self.blocks[block] = []
                 return None
@@ -142,11 +168,19 @@ class IdlPositions:
 
 
 def extractIndex(doc: t.SpecT) -> dict[str, Any]:
-    try:
-        source = doc.inputSource.read().content
-    except Exception:
-        source = ""
-    idl = IdlPositions(source)
+    # The IDL positions in the source and in each included file.
+    idls: dict[str | None, IdlPositions] = {}
+
+    def idlPositions(file: str | None) -> IdlPositions:
+        if file not in idls:
+            try:
+                inputSource = doc.inputSource if file is None else doc.inputSource.relative(file)
+                source = inputSource.read().content if inputSource is not None else ""
+            except Exception:
+                source = ""
+            idls[file] = IdlPositions(source, file)
+        return idls[file]
+
     parents = {child: parent for parent in doc.document.iter() for child in parent}
 
     def idlBlock(el: t.ElementT) -> t.ElementT | None:
@@ -157,15 +191,16 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
             e = parents.get(e)
         return None
 
-    def located(el: t.ElementT) -> tuple[tuple[int, int], bool] | None:
+    def located(el: t.ElementT) -> tuple[Position, bool] | None:
         """The element's position, and whether it was recovered from an IDL
         block."""
         pos = position(el)
         if pos:
             return pos, False
         block = idlBlock(el)
-        if block is not None:
-            pos = idl.find(block, el)
+        blockPos = position(block) if block is not None else None
+        if block is not None and blockPos is not None:
+            pos = idlPositions(blockPos.file).find(block, el)
             if pos:
                 return pos, True
         return None
@@ -181,11 +216,10 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
         if el.get("data-dfn-type") is not None and el.get("id"):
             where = located(el)
             if where:
-                (line, col), inIdl = where
+                pos, inIdl = where
                 dfns.append(
                     {
-                        "line": line,
-                        "col": col,
+                        **pos.fields(),
                         "id": el.get("id"),
                         "type": el.get("data-dfn-type"),
                         "for": splitFors(el.get("data-dfn-for")),
@@ -199,11 +233,10 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
         if tag == "a" and el.get("href") and "self-link" not in (el.get("class") or "").split():
             where = located(el)
             if where:
-                (line, col), inIdl = where
+                pos, inIdl = where
                 links.append(
                     {
-                        "line": line,
-                        "col": col,
+                        **pos.fields(),
                         "href": el.get("href"),
                         "type": el.get("data-link-type"),
                         "for": splitFors(el.get("data-link-for")),
@@ -218,15 +251,14 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
             pos = position(el)
             if pos:
                 headings.append(
-                    {"line": pos[0], "col": pos[1], "id": el.get("id"), "level": int(tag[1]), "text": headingText(el)},
+                    {**pos.fields(), "id": el.get("id"), "level": int(tag[1]), "text": headingText(el)},
                 )
         if el.get("data-algorithm") is not None:
             pos = position(el)
             if pos:
                 algorithms.append(
                     {
-                        "line": pos[0],
-                        "col": pos[1],
+                        **pos.fields(),
                         "name": el.get("data-algorithm") or None,
                         "for": el.get("data-algorithm-for") or None,
                     },
@@ -265,7 +297,7 @@ def listSteps(root: t.ElementT) -> list[dict[str, Any]]:
                     itemPath = [*path, str(number)]
                     pos = position(item)
                     if pos:
-                        steps.append({"line": pos[0], "col": pos[1], "path": ".".join(itemPath)})
+                        steps.append({**pos.fields(), "path": ".".join(itemPath)})
                     walk(item, itemPath)
             else:
                 walk(child, path)
