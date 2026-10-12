@@ -92,9 +92,15 @@ class Serializer:
         ],
     )
 
-    def __init__(self, opaqueElements: t.Iterable[str], blockElements: t.Iterable[str]) -> None:
+    def __init__(
+        self,
+        opaqueElements: t.Iterable[str],
+        blockElements: t.Iterable[str],
+        keptAttrs: t.Iterable[str] = (),
+    ) -> None:
         self.opaqueEls = frozenset(opaqueElements)
         self.blockEls = frozenset(blockElements)
+        self.keptAttrs = frozenset(keptAttrs)
 
     def serialize(self, root: t.ElementT) -> str:
         output = io.StringIO()
@@ -139,9 +145,10 @@ class Serializer:
         for attrName, attrVal in sorted(el.items()):
             attrName = self.unfuckName(str(attrName))
             attrVal = str(attrVal)
-            if str(attrName).startswith("bs-"):
+            if str(attrName).startswith("bs-") and attrName not in self.keptAttrs:
                 # Skip bs- prefixed attributes, as they're used
-                # for Bikeshed-internal purposes.
+                # for Bikeshed-internal purposes (but for those a tool asks
+                # to keep, ex: `bikeshed index --html`'s positions).
                 continue
             if attrName == "viewbox":
                 attrName = "viewBox"

@@ -487,6 +487,12 @@ def main() -> None:
         default=True,
         help="Output JSON (the only format, for now; see bikeshed/index).",
     )
+    indexParser.add_argument(
+        "--html",
+        dest="html",
+        default=None,
+        help="Also write the rendered spec to this file, with its elements' source positions (see bikeshed/index).",
+    )
 
     options, extras = argparser.parse_known_args()
 
@@ -814,6 +820,10 @@ def handleIndex(options: argparse.Namespace, extras: list[str]) -> None:
     doc.mdCommandLine.addData("Prepare For TR", "no")
     with m.messagesSilent():
         result = index.indexSpec(doc)
+        rendered = index.renderSpec(doc) if options.html else None
+    if options.html and rendered is not None:
+        with open(options.html, "w", encoding="utf-8") as f:
+            f.write(rendered)
     text = json.dumps(result, indent=1, ensure_ascii=False)
     if options.outfile in (None, "-"):
         sys.stdout.write(text + "\n")

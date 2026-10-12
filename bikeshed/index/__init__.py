@@ -40,6 +40,10 @@ in" link to), its `syntax` is the autolink syntax it was written with (ex:
 ordered lists (ex: algorithms' steps, whether or not they're in an
 `algorithm` container), whose `path` is their numbers in their nested lists,
 from the outermost (ex: "2.3").
+
+With `--html`, `bikeshed index` also writes the rendered spec (see
+`renderSpec`), whose elements with source positions have them as `bs-pos`
+attributes.
 """
 
 from __future__ import annotations
@@ -77,6 +81,24 @@ def indexSpec(doc: t.SpecT) -> dict[str, Any]:
     finally:
         unsortedJunk.cleanupHTML = cleanup
     return captured["index"]
+
+
+def renderSpec(doc: t.SpecT) -> str | None:
+    """The rendered spec, once `indexSpec` has preprocessed it, with its
+    elements' source positions (see `position`) as `bs-pos` attributes: the
+    line ("12"), or the file and the line ("intro.md:12"), for tools that show
+    the rendering with the source's history (ex: searchfox's blame of its
+    blocks)."""
+    for el in doc.document.iter():
+        if not isinstance(el.tag, str):
+            continue
+        pos = position(el)
+        if pos is not None:
+            el.set("bs-pos", f"{pos.file}:{pos.line}" if pos.file is not None else str(pos.line))
+    rendered = h.Serializer(doc.md.opaqueElements, doc.md.blockElements, keptAttrs=["bs-pos"]).serialize(
+        doc.document,
+    )
+    return rendered
 
 
 class Position(NamedTuple):
