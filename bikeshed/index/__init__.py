@@ -18,18 +18,24 @@ includes (`<pre class=include>`) by that path (which is relative to the
 spec's source, as Bikeshed resolves it).  The JSON (see `INDEX_VERSION`):
 
     {
-      "bikeshed-index": 2,
+      "bikeshed-index": 3,
       "spec": {"shortname", "level", "title", "url"},
-      "dfns": [{"line", "col", "file"?, "id", "type", "for": [...],
-                "lt": [...], "export", "noexport", "text", "idl"}],
-      "links": [{"line", "col", "file"?, "href", "type", "for": [...], "lt",
-                 "spec", "syntax", "text", "idl"}],
-      "headings": [{"line", "col", "file"?, "id", "level", "text"}],
+      "dfns": [{"line", "col", "file"?, "id", "oldids": [...], "type",
+                "for": [...], "lt": [...], "export", "noexport", "text",
+                "idl"}],
+      "links": [{"line", "col", "file"?, "id", "href", "type", "for": [...],
+                 "lt", "spec", "syntax", "text", "idl"}],
+      "headings": [{"line", "col", "file"?, "id", "oldids": [...], "level",
+                    "text"}],
       "algorithms": [{"line", "col", "file"?, "name", "for"}],
       "steps": [{"line", "col", "file"?, "path"}]
     }
 
-where a link's `syntax` is the autolink syntax it was written with (ex:
+where a definition's or heading's `oldids` are the ids it keeps from before
+(its `oldids` attribute's, which Bikeshed gives empty spans in it), a link's
+`id` is the one Bikeshed gave it, if any (ex: "ref-for-concept-tree①", as
+autolinks get, deduplicated in document order, which dfn panels' "Referenced
+in" link to), its `syntax` is the autolink syntax it was written with (ex:
 `[=tree=]`, `{{Node}}`, `[[!DOM]]`), if any, and `steps` are the items of
 ordered lists (ex: algorithms' steps, whether or not they're in an
 `algorithm` container), whose `path` is their numbers in their nested lists,
@@ -46,8 +52,9 @@ from .. import config, h, unsortedJunk
 if TYPE_CHECKING:
     from .. import t
 
-# (2: positions in included files have their "file".)
-INDEX_VERSION = 2
+# (2: positions in included files have their "file".  3: definitions' and
+# headings' `oldids`, and links' `id`s.)
+INDEX_VERSION = 3
 
 # An included file's elements' `bs-parse-context` (see `includes`), whose path
 # is relative to the spec's source.
@@ -98,6 +105,16 @@ def position(el: t.ElementT) -> Position | None:
     if context and not included:
         return None
     return Position(included[1] if included else None, int(match[1]), int(match[2] or 1))
+
+
+def oldIds(el: t.ElementT) -> list[str]:
+    """The ids the element keeps from before: those of the spans Bikeshed gave
+    it for its `oldids` attribute (see `h.addOldIDs`)."""
+    return [
+        child.get("id") or ""
+        for child in el
+        if isinstance(child.tag, str) and "bs-old-id" in (child.get("class") or "").split() and child.get("id")
+    ]
 
 
 def words(text: str) -> str:
@@ -231,6 +248,7 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
                     {
                         **pos.fields(),
                         "id": el.get("id"),
+                        "oldids": oldIds(el),
                         "type": el.get("data-dfn-type"),
                         "for": splitFors(el.get("data-dfn-for")),
                         "lt": splitLts(el.get("data-lt")),
@@ -247,6 +265,7 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
                 links.append(
                     {
                         **pos.fields(),
+                        "id": el.get("id"),
                         "href": el.get("href"),
                         "type": el.get("data-link-type"),
                         "for": splitFors(el.get("data-link-for")),
@@ -261,7 +280,13 @@ def extractIndex(doc: t.SpecT) -> dict[str, Any]:
             pos = position(el)
             if pos:
                 headings.append(
-                    {**pos.fields(), "id": el.get("id"), "level": int(tag[1]), "text": headingText(el)},
+                    {
+                        **pos.fields(),
+                        "id": el.get("id"),
+                        "oldids": oldIds(el),
+                        "level": int(tag[1]),
+                        "text": headingText(el),
+                    },
                 )
         if el.get("data-algorithm") is not None:
             pos = position(el)
