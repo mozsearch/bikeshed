@@ -2028,7 +2028,7 @@ def parseAutolinkDfn(s: Stream, start: int) -> ResultT[SafeText | list[ParserNod
     if s[innerEnd] == "|":
         rest, nodeEnd, _ = parseLinkText(s, innerEnd + 1, "[=", "=]", startTag)
         if rest is not None:
-            return Ok([startTag, *rest], nodeEnd)
+            return Ok([coverLinkInfo(s, startTag, innerEnd + 1), *rest], nodeEnd)
         else:
             nodeEnd = innerEnd + 1
     else:
@@ -2081,7 +2081,7 @@ def parseAutolinkAbstract(s: Stream, start: int) -> ResultT[SafeText | list[Pars
     if s[innerEnd] == "|":
         rest, nodeEnd, _ = parseLinkText(s, innerEnd + 1, "[$", "$]", startTag)
         if rest is not None:
-            return Ok([startTag, *rest], nodeEnd)
+            return Ok([coverLinkInfo(s, startTag, innerEnd + 1), *rest], nodeEnd)
         else:
             nodeEnd = innerEnd + 1
     else:
@@ -2139,7 +2139,9 @@ def parseAutolinkHeader(s: Stream, start: int) -> ResultT[SafeText | list[Parser
         if rest is not None:
             endCode = EndTag.fromStream(s, nodeEnd, nodeEnd, startCode)
             endTick = RawText.fromStream(s, nodeEnd, nodeEnd, "`")
-            return Ok([startTick, startCode, startTag, *rest, endCode, endTick], nodeEnd)
+            return Ok(
+                [startTick, startCode, coverLinkInfo(s, startTag, innerEnd + 1), *rest, endCode, endTick], nodeEnd
+            )
         else:
             nodeEnd = innerEnd + 1
     else:
@@ -2220,7 +2222,7 @@ def parseAutolinkIdl(s: Stream, start: int) -> ResultT[ParserNode | list[ParserN
         rest, nodeEnd, _ = parseLinkText(s, innerEnd + 1, "{{", "}}", startTag)
         if rest is not None:
             endCode = EndTag.fromStream(s, nodeEnd, nodeEnd, startCode)
-            return Ok([startCode, startTag, *rest, endCode], nodeEnd)
+            return Ok([startCode, coverLinkInfo(s, startTag, innerEnd + 1), *rest, endCode], nodeEnd)
         else:
             nodeEnd = innerEnd + 1
     else:
@@ -2285,7 +2287,7 @@ def parseAutolinkCddl(s: Stream, start: int) -> ResultT[ParserNode | list[Parser
         rest, nodeEnd, _ = parseLinkText(s, innerEnd + 1, "{^", "^}", startTag)
         if rest is not None:
             endCode = EndTag.fromStream(s, nodeEnd, nodeEnd, startCode)
-            return Ok([startCode, startTag, *rest, endCode], nodeEnd)
+            return Ok([startCode, coverLinkInfo(s, startTag, innerEnd + 1), *rest, endCode], nodeEnd)
         else:
             nodeEnd = innerEnd + 1
     else:
@@ -2347,7 +2349,7 @@ def parseAutolinkElement(s: Stream, start: int) -> ResultT[ParserNode | list[Par
         rest, nodeEnd, _ = parseLinkText(s, innerEnd + 1, "<{", "}>", startTag)
         if rest is not None:
             endCode = EndTag.fromStream(s, nodeEnd, nodeEnd, startCode)
-            return Ok([startCode, startTag, *rest, endCode], nodeEnd)
+            return Ok([startCode, coverLinkInfo(s, startTag, innerEnd + 1), *rest, endCode], nodeEnd)
         else:
             nodeEnd = innerEnd + 1
     else:
@@ -2411,7 +2413,7 @@ def parseAutolinkBiblioSection(s: Stream, start: int) -> ResultT[ParserNode | li
     if s[innerEnd] == "|":
         rest, nodeEnd, _ = parseLinkText(s, innerEnd + 1, "[[", "]]", startTag)
         if rest is not None:
-            return Ok([startTag, *rest], nodeEnd)
+            return Ok([coverLinkInfo(s, startTag, innerEnd + 1), *rest], nodeEnd)
         else:
             nodeEnd = innerEnd + 1
     else:
@@ -2491,6 +2493,16 @@ def parseLinkInfo(
         lt = lt[1:]
 
     return Ok(LinkData(lt, linkFor, linkType), innerEnd)
+
+
+def coverLinkInfo(s: Stream, startTag: StartTag, end: int) -> StartTag:
+    # A shorthand with explicit link text has no node for its source before
+    # the text (ex: the "foo|" of [=foo|bar=]), so its start tag stands for
+    # that source, or else its line breaks wouldn't be counted (see
+    # strFromNodes), and the Markdown's line numbers after it would be off.
+    startTag.endLine = s.line(end)
+    startTag.endLoc = s.loc(end)
+    return startTag
 
 
 def parseLinkText(

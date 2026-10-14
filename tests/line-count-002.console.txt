@@ -1,0 +1,14 @@
+LINE 34: The heading 'Heading' needs a manually-specified ID.
+LINE 31:1: Couldn't find 'foo' in bibliography data. Did you mean:
+  aom
+  bfo
+  dom
+  dot
+  fir
+LINE 13:1: No 'dfn' refs found for 'foo bar'.
+LINE 16:1: No 'abstract-op' refs found for 'foo bar'.
+LINE 19:1: No 'http-header' refs found for 'foo bar'.
+LINE 22:1: No 'idl' refs found for 'foo bar'.
+LINE 25:1: No 'cddl' refs found for 'foo bar'.
+LINE 28:1: No 'element' refs found for 'foo bar'.
+LINE 36:1: No 'property' refs found for 'qux'.
